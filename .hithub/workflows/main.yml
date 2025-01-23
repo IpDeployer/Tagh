@@ -1,11 +1,9 @@
 name: Telegram Bot Runner
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '*/5 * * * *'  # Runs every 5 minutes
-  push:
-    branches: [ main ]
+    - cron: '0 */6 * * *'  # Runs every 6 hours
+  workflow_dispatch:
 
 jobs:
   run-bot:
@@ -22,52 +20,71 @@ jobs:
 
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
         pip install python-telegram-bot requests
 
     - name: Run Telegram Bot
-      env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       run: |
         cat << "EOF" > bot.py
         import os
         import requests
         import base64
-        from telegram import Update, Bot
+        from telegram import Update, Bot, ReplyKeyboardMarkup, KeyboardButton
         from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
+        # Hardcoded bot token (INSECURE!)
+        BOT_TOKEN = '7671541547:AAH0Frbt2I6I3VJWRsXCBO8LbmIhMhH6Pao'
+
+        def get_keyboard():
+            return ReplyKeyboardMarkup([
+                [KeyboardButton("/start"), KeyboardButton("/help")],
+                [KeyboardButton("Decode BPB Link")]
+            ], resize_keyboard=True)
+
         def start(update: Update, context: CallbackContext) -> None:
-            update.message.reply_text('Send me a BPB panel link to decode!')
+            update.message.reply_text(
+                "Welcome to BPB Decoder Bot!\nSend a BPB link:",
+                reply_markup=get_keyboard()
+            )
+
+        def help_command(update: Update, context: CallbackContext) -> None:
+            update.message.reply_text(
+                "Send your BPB panel link directly or use the button!",
+                reply_markup=get_keyboard()
+            )
 
         def handle_message(update: Update, context: CallbackContext) -> None:
-            url = update.message.text
-            chat_id = update.message.chat_id
+            text = update.message.text
             
+            if text == "Decode BPB Link":
+                update.message.reply_text("Send your BPB link now:")
+                return
+                
+            if text.startswith('http'):
+                process_link(update, context, text)
+            else:
+                update.message.reply_text("Send a valid BPB link")
+
+        def process_link(update: Update, context: CallbackContext, url: str):
+            chat_id = update.message.chat_id
             try:
-                # Fetch the content from the provided URL
                 response = requests.get(url)
-                response.raise_for_status()
-                
-                # Decode base64 content
                 decoded = base64.b64decode(response.text).decode('utf-8')
+                configs = [c.strip() for c in decoded.split('\n') if c.strip()]
                 
-                # Split configurations into individual lines
-                configs = decoded.split('\n')
-                
-                # Send each configuration separately
                 for config in configs:
-                    if config.strip():  # Skip empty lines
-                        context.bot.send_message(chat_id=chat_id, text=config.strip())
-                        
+                    context.bot.send_message(chat_id, config)
+                
+                update.message.reply_text("Done!", reply_markup=get_keyboard())
+                
             except Exception as e:
-                context.bot.send_message(chat_id=chat_id, text=f"Error: {str(e)}")
+                context.bot.send_message(chat_id, f"Error: {str(e)}")
 
         def main() -> None:
-            bot_token = os.getenv('7671541547:AAH0Frbt2I6I3VJWRsXCBO8LbmIhMhH6Pao')
-            updater = Updater(bot_token)
+            updater = Updater(BOT_TOKEN)
             dispatcher = updater.dispatcher
 
             dispatcher.add_handler(CommandHandler("start", start))
+            dispatcher.add_handler(CommandHandler("help", help_command))
             dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
             updater.start_polling()
