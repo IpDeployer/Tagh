@@ -62,7 +62,7 @@ jobs:
                 context.bot.send_message(chat_id=chat_id, text=f"Error: {str(e)}")
 
         def main() -> None:
-            bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+            bot_token = os.getenv('7671541547:AAH0Frbt2I6I3VJWRsXCBO8LbmIhMhH6Pao')
             updater = Updater(bot_token)
             dispatcher = updater.dispatcher
 
