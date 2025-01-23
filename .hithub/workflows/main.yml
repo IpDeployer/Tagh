@@ -2,7 +2,7 @@ name: Telegram Bot Runner
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Runs every 6 hours
+    - cron: '*/5 * * * *'  # Every 5 minutes for testing
   workflow_dispatch:
 
 jobs:
@@ -16,22 +16,28 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v2
       with:
-        python-version: '3.x'
+        python-version: '3.10'
 
     - name: Install dependencies
       run: |
         pip install python-telegram-bot requests
 
-    - name: Run Telegram Bot
+    - name: Run Telegram Bot with Debugging
       run: |
         cat << "EOF" > bot.py
-        import os
+        import logging
         import requests
         import base64
-        from telegram import Update, Bot, ReplyKeyboardMarkup, KeyboardButton
+        from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
         from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
-        # Hardcoded bot token (INSECURE!)
+        # Enable logging
+        logging.basicConfig(
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            level=logging.INFO
+        )
+        logger = logging.getLogger(__name__)
+
         BOT_TOKEN = '7671541547:AAH0Frbt2I6I3VJWRsXCBO8LbmIhMhH6Pao'
 
         def get_keyboard():
@@ -41,54 +47,82 @@ jobs:
             ], resize_keyboard=True)
 
         def start(update: Update, context: CallbackContext) -> None:
+            logger.info("Start command received")
             update.message.reply_text(
-                "Welcome to BPB Decoder Bot!\nSend a BPB link:",
+                "Bot is active! Send BPB link:",
                 reply_markup=get_keyboard()
             )
 
         def help_command(update: Update, context: CallbackContext) -> None:
-            update.message.reply_text(
-                "Send your BPB panel link directly or use the button!",
-                reply_markup=get_keyboard()
-            )
+            logger.info("Help command received")
+            update.message.reply_text("Send any BPB panel link to decode")
 
         def handle_message(update: Update, context: CallbackContext) -> None:
+            logger.info(f"Message received: {update.message.text}")
             text = update.message.text
             
             if text == "Decode BPB Link":
-                update.message.reply_text("Send your BPB link now:")
+                update.message.reply_text("Please send your BPB panel link:")
                 return
                 
             if text.startswith('http'):
                 process_link(update, context, text)
             else:
-                update.message.reply_text("Send a valid BPB link")
+                update.message.reply_text("Please send a valid URL starting with http")
 
         def process_link(update: Update, context: CallbackContext, url: str):
             chat_id = update.message.chat_id
             try:
-                response = requests.get(url)
-                decoded = base64.b64decode(response.text).decode('utf-8')
+                logger.info(f"Processing URL: {url}")
+                
+                # Verify URL format
+                if not url.startswith(('http://', 'https://')):
+                    raise ValueError("Invalid URL format")
+                
+                # Fetch content
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                
+                # Decode content
+                try:
+                    decoded = base64.b64decode(response.text).decode('utf-8')
+                except Exception as e:
+                    logger.error(f"Decoding error: {str(e)}")
+                    raise ValueError("Invalid base64 content") from e
+                
+                # Process configurations
                 configs = [c.strip() for c in decoded.split('\n') if c.strip()]
+                
+                if not configs:
+                    raise ValueError("No valid configurations found")
                 
                 for config in configs:
                     context.bot.send_message(chat_id, config)
+                    logger.info(f"Sent config: {config[:50]}...")  # Log first 50 chars
                 
-                update.message.reply_text("Done!", reply_markup=get_keyboard())
+                update.message.reply_text("Decoding complete!")
                 
             except Exception as e:
+                logger.error(f"Error processing request: {str(e)}")
                 context.bot.send_message(chat_id, f"Error: {str(e)}")
 
         def main() -> None:
-            updater = Updater(BOT_TOKEN)
-            dispatcher = updater.dispatcher
+            logger.info("Starting bot...")
+            try:
+                updater = Updater(BOT_TOKEN)
+                dispatcher = updater.dispatcher
+                logger.info("Bot initialized successfully")
 
-            dispatcher.add_handler(CommandHandler("start", start))
-            dispatcher.add_handler(CommandHandler("help", help_command))
-            dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+                dispatcher.add_handler(CommandHandler("start", start))
+                dispatcher.add_handler(CommandHandler("help", help_command))
+                dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
-            updater.start_polling()
-            updater.idle()
+                updater.start_polling()
+                logger.info("Bot started polling")
+                updater.idle()
+                
+            except Exception as e:
+                logger.error(f"Failed to start bot: {str(e)}")
 
         if __name__ == '__main__':
             main()
